@@ -1,0 +1,435 @@
+# copy right MIT
+# powerd by power ::
+import uvicorn
+import sqlite3
+from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+
+def get_today_date():
+    return datetime.now().date()
+
+# ---------------- DB ----------------
+DB_NAME = "projectpfa.db"
+
+def get_conn():
+    return sqlite3.connect(DB_NAME, check_same_thread=False)
+
+# INIT TABLES (same as yours)
+def init_db():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS register (
+            uuid INTEGER PRIMARY KEY,
+            name TEXT,
+            email TEXT,
+            password TEXT,
+            idgroup INTEGER
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS groupStudy (
+            identify TEXT, 
+            idgroupSelf INTEGER,
+            namegroup TEXT,
+            topic TEXT,
+            datecreate TEXT,
+            contentgroup TEXT,
+            PRIMARY KEY (idgroupSelf, datecreate,identify)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS members (
+            userid INTEGER,
+            groupid INTEGER,
+            identify TEXT,
+            Date TEXT,
+            PRIMARY KEY (userid, groupid,Date)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            taskId INTEGER PRIMARY KEY AUTOINCREMENT,
+            identify TEXT,
+            Date TEXT,
+            content TEXT,
+            nametask TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+app = FastAPI()
+
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:8000"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------- MODEL ----------------
+class User(BaseModel):
+    uuid :int  
+    name: str
+    email: str | None = None
+    password: str
+
+class Group(BaseModel):
+    idgroup : int
+    namegroup : str
+    topic : str
+    datecreate :str
+    contentgroup : str
+    identify : str
+
+class Login(BaseModel):
+    email : str
+    password:str
+    
+class BodyGroup (BaseModel):
+    userid: int 
+    groupid: int  
+    identify :str 
+    Date :str
+    
+class TASK (BaseModel) :
+    identify  : str  
+    Date: str  
+    content : str
+    nametask : str
+
+# ---------------- FUNCTION ----------------
+def adduser(uuid,name, email, password):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO register (uuid,name, email, password, idgroup)
+        VALUES (?, ?, ?, ?,?)
+    """, (uuid,name, email, password, uuid))
+
+    conn.commit()
+    conn.close()
+    
+def addgroup(idgroup,namegroup,topic,datecreate,contentgroup,identify):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO groupStudy (idgroupSelf, namegroup, topic, datecreate,contentgroup,identify)
+        VALUES (?, ?, ?,?,?,?)
+    """, (idgroup, namegroup, topic, datecreate,contentgroup,identify))    
+
+    conn.commit()
+    conn.close()
+
+def addMemberUsr(userId,groupId,identify,Date):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO members (userid, groupid,identify, Date)
+        VALUES (?, ?, ?,?)
+    """, (userId, groupId,identify, Date))
+
+    conn.commit()
+    conn.close()
+
+def add__pretty_task(identify,Date,content,nametask):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO tasks (identify, Date,content, nametask)
+        VALUES (?, ?, ?,?)
+    """, (identify, Date,content, nametask))
+
+    conn.commit()
+    conn.close()
+
+def get_tasks_by_id(ID: str):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM tasks
+        WHERE identify = ?
+    """, (ID,))
+
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return None
+
+    return [dict(zip(columns, row)) for row in rows]
+
+# ---------------- ROUTE ----------------
+@app.post("/register")
+def register(user: User):
+    adduser(user.uuid, user.name, user.email, user.password)
+    return {"message": "success"}
+
+@app.post("/Creategroup")
+def Createroup(group : Group):
+    addgroup(group.idgroup,group.namegroup,group.topic,group.datecreate,group.contentgroup,group.identify)
+    return {"message": "create success"}
+
+@app.get("/fetchdeb")
+def fetchDb():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM register")
+    rows3 = cursor.fetchall()
+    
+    cursor.execute("SELECT * FROM groupStudy")
+    rows2 = cursor.fetchall()
+    
+    cursor.execute("SELECT groupid,userid FROM members")
+    rows1 = cursor.fetchall()
+
+    conn.close()
+    return {"register":rows3 ,"groupStudy":rows2,"memebers":rows1}
+
+@app.get("/getsizerepo/{identify}")
+def sizerepo(identify:str):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT name,userid ,Date
+        FROM members AS m ,register AS r 
+        WHERE m.userid =r.uuid  AND groupid = ?
+    """, (identify,))
+    
+    groups = cursor.fetchall()
+    conn.close()
+
+    return {"mebmerId":groups}
+
+@app.post("/login")
+def root_login(l: Login):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM register
+        WHERE email = ? AND password = ?
+    """, (l.email, l.password))
+
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        return {"message": "Invalid email or password"}
+
+    return {
+        "uuid" : user[0],
+        "name" : user[1],
+        "email" : user[2],
+        "groupid":user[4]
+    }
+
+@app.get("/getmygroups/{id}")
+def get_my_groups(id: int):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT idgroupSelf, identify, topic, datecreate, contentgroup,namegroup
+        FROM register
+        JOIN groupStudy
+        ON register.idgroup = groupStudy.idgroupSelf
+        WHERE register.id = ?
+    """, (id,))
+
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"message": "No groups found for this user"}
+
+    groups = [dict(zip(columns, row)) for row in rows]
+    return {"groups": groups}
+
+@app.get("/groups")
+def get_my_groups():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT idgroupSelf, identify, topic, datecreate, contentgroup, namegroup
+        FROM register
+        JOIN groupStudy
+        ON register.idgroup = groupStudy.idgroupSelf
+    """)
+
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"message": "No groups found"}
+
+    groups = [dict(zip(columns, row)) for row in rows]
+    return {"groups": groups}
+
+@app.post("/addMember")
+def addMember(p :BodyGroup):
+    addMemberUsr(p.userid,p.groupid,p.identify,p.Date) 
+    return  "succes"
+
+@app.get("/followGroups")
+def followgroup():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute(""" SELECT * FROM members""")
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"message": "No groups found"}
+
+    groups = [dict(zip(columns, row)) for row in rows]
+    return groups
+
+@app.get("/getfollwgroups/{id1}")
+def getfollowgroups(id1: int):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT g.idgroupSelf,g.identify , g.topic ,g.contentgroup,g.datecreate ,g.namegroup
+        FROM members AS m
+        JOIN groupStudy AS g
+        ON m.groupid = g.idgroupSelf
+        WHERE m.userid = ? AND g.identify = m.identify 
+    """, (id1,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return "not found"
+    
+    result = []
+    for row in rows:
+        result.append({
+            "idgroup": row[0],
+            "identify": row[1],
+            "topic": row[2],
+            "contentgroup": row[3],
+            "datecreate":row[4],
+            "name":row[5]
+        })
+
+    return result
+
+@app.get("/users")
+def fetchusers():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM register")
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"message": "No groups found for this user"}
+
+    groups = [dict(zip(columns, row)) for row in rows]
+    return {"users":groups}
+
+@app.get("/mygroupsfollow/{myID}")
+def seeMyGroup(myID: int):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT *
+        FROM members AS m
+        WHERE m.userid = ?
+    """, (myID,))
+
+    groups = cursor.fetchall()
+    conn.close()
+
+    if(len(groups)==0):
+        return {"you dont follow groups"}
+    return {"groups": groups}
+
+@app.get("/session/{idSession}")
+def root__session(idSession:str):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""SELECT * FROM groupStudy WHERE identify = ?""", (idSession,))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        return {"message": "error in repo"}
+ 
+    return {
+        "identify": user[0],
+        "groupid ": user[1],
+        "namegroup":user[2],
+        "topic" : user[3],
+        "datecreate":user[4],
+        "content":user[5]
+    }
+
+@app.post("/tasks")
+def root__identify(ts : TASK):
+    add__pretty_task(ts.identify,ts.Date,ts.content,ts.nametask)
+    return ts
+
+@app.get("/tasks/{ID}")
+def root__identify(ID: str):
+    groups = get_tasks_by_id(ID)
+
+    if not groups:
+        return {"message": "No groups found for this user"}
+
+    return groups
+
+@app.post("/tasks/delete/{ID}/{identify}")
+def root_delete(ID: int ,identify:str ):
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM tasks
+        WHERE  taskId = ? AND identify = ?
+    """, (ID,identify))
+
+    conn.commit()
+    conn.close()
+
+    return {"message":"DELETE SUCCESSFULLY" , "alltask":get_tasks_by_id(identify)}
+
+# ---------------- RUN ----------------
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)
